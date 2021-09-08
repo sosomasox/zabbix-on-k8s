@@ -1,0 +1,265 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zabbix-statefulset
+  namespace: zabbix
+  labels:
+    app.kubernetes.io/name: zabbix-statefulset
+spec:
+  replicas: 2
+  serviceName: zabbix-statefulset
+  podManagementPolicy: OrderedReady # or Parallel (default is OrderedReady)
+  updateStrategy:
+    type: RollingUpdate # or OnDelete (default is RollingUpdate)
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zabbix
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zabbix
+    spec:
+      containers:
+        - name: mysql
+          image: mysql/mysql-server:8.0.26
+          args:
+            - --character-set-server=utf8
+            - --collation-server=utf8_bin
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_root_password
+            - name: MYSQL_ALLOW_EMPTY_PASSWORD
+              value: "no"
+          ports:
+            - name: mysql
+              containerPort: 3306
+          volumeMounts:
+            - name: mysql-volume
+              mountPath: /var/lib/mysql
+            - name: my-cnf
+              mountPath: /etc/my.cnf
+              subPath: my.cnf
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            privileged: true
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+            capabilities:
+              add:
+                - ALL
+        - name: zabbix-server
+          image: zabbix/zabbix-server-mysql:alpine-5.2-latest
+          ports:
+            - name: snmptrapd
+              containerPort: 162
+            - name: zabbix-trapper
+              protocol: TCP
+              containerPort: 10051
+          volumeMounts:
+            - name: mysql-volume
+              mountPath: /var/lib/mysql
+          #livenessProbe:
+          #  tcpSocket:
+          #    port: zabbix-trapper
+          #  initialDelaySeconds: 900
+          #  periodSeconds: 30
+          #  timeoutSeconds: 30
+          #  successThreshold: 1
+          #  failureThreshold: 3
+          #readinessProbe:
+          #  tcpSocket:
+          #    port: zabbix-trapper
+          #  initialDelaySeconds: 900
+          #  periodSeconds: 10
+          env:
+            - name: MYSQL_UNIX_PORT
+              value: /var/lib/mysql/mysql.sock
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_root_password
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_zabbix_user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_zabbix_password
+            - name: MYSQL_DATABASE
+              value: "zabbix"
+            - name: DB_SERVER_HOST
+              value: localhost
+            - name: ZBX_CACHESIZE
+              value: "4G"
+            - name: ZBX_STARTPOLLERS
+              value: "100"
+            - name: ZBX_STARTLLDPROCESSORS
+              value: "8"
+            - name: ZBX_STARTPOLLERSUNREACHABLE
+              value: "50"
+            - name: ZBX_STARTALERTERS
+              value: "100"
+            - name: ZBX_STARTPINGERS
+              value: "100"
+            - name: ZBX_STARTHTTPPOLLERS
+              value: "50"
+            - name: ZBX_CACHEUPDATEFREQUENCY
+              value: "180"
+            - name: ZBX_STARTDBSYNCERS
+              value: "64"
+            - name: ZBX_HISTORYCACHESIZE
+              value: "128M"
+            - name: ZBX_HISTORYINDEXCACHESIZE
+              value: "64M"
+            - name: ZBX_TRENDCACHESIZE
+              value: "256M"
+            - name: ZBX_TIMEOUT
+              value: "30"
+            - name: ZBX_UNREACHABLEPERIOD
+              value: "300"
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            privileged: true
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+            capabilities:
+              add:
+                - ALL
+        - name: zabbix-agent
+          image: zabbix/zabbix-agent:5.2-alpine-latest
+          ports:
+            - name: zabbix-agent
+              protocol: TCP
+              containerPort: 10050
+          env:
+            - name: ZBX_SERVER_HOST
+              value: localhost
+        - name: zabbix-web
+          image: zabbix/zabbix-web-nginx-mysql:alpine-5.2-latest
+          ports:
+            - name: web-http
+              protocol: TCP
+              containerPort: 8080
+          volumeMounts:
+            - name: php-ini
+              mountPath: /etc/php7/php.ini
+              subPath: php.ini
+            - name: zabbix-web-ssl
+              mountPath: /etc/ssl/nginx
+              readOnly: true
+            - name: mysql-volume
+              mountPath: /var/lib/mysql
+          resources:
+            limits:
+              cpu: 200m
+              memory: 400Mi
+            requests:
+              cpu: 200m
+              memory: 400Mi
+          #livenessProbe:
+          #  httpGet:
+          #    path: /
+          #    port: web-http
+          #    scheme: HTTP
+          #  initialDelaySeconds: 15
+          #  timeoutSeconds: 3
+          #  periodSeconds: 30
+          #  timeoutSeconds: 30
+          #  successThreshold: 1
+          #  failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: web-http
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+          env:
+            - name: MYSQL_UNIX_PORT
+              value: /var/lib/mysql/mysql.sock
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_root_password
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_zabbix_user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql_zabbix_password
+            - name: MYSQL_DATABASE
+              value: "zabbix"
+            - name: ZBX_SERVER_NAME
+              value: "Zabbix"
+            - name: ZBX_SERVER_HOST
+              value: localhost
+            - name: ZBX_SERVER_PORT
+              value: "10051"
+            - name: DB_SERVER_HOST
+              value: localhost
+            - name: DB_SERVER_PORT
+              value: "3306"
+            - name: PHP_TZ
+              value: "Asia/Tokyo"
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            privileged: true
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+            capabilities:
+              add:
+                - ALL
+      volumes:
+        - name: my-cnf
+          configMap:
+            name: my-cnf-cm
+        - name: php-ini
+          configMap:
+            name: php-ini-cm
+        - name: zabbix-web-ssl
+          hostPath:
+            path: /home/dotneft/zbx/zbx_env/etc/ssl/nginx/
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-volume
+    spec:
+      storageClassName: longhorn
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-web-svc
+  namespace: zabbix
+  labels:
+    app.kubernetes.io/name: zabbix-web-svc
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app.kubernetes.io/name: zabbix
+---
