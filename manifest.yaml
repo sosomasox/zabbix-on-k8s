@@ -154,6 +154,9 @@ spec:
             - name: php-ini
               mountPath: /etc/php7/php.ini
               subPath: php.ini
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/nginx.conf
+              subPath: nginx.conf
             - name: zabbix-web-ssl
               mountPath: /etc/ssl/nginx
               readOnly: true
@@ -232,6 +235,9 @@ spec:
         - name: my-cnf
           configMap:
             name: my-cnf-cm
+        - name: nginx-conf
+          configMap:
+            name: nginx-conf-cm
         - name: php-ini
           configMap:
             name: php-ini-cm
